@@ -1,39 +1,39 @@
 
-
-#include <linux/linkage.h>
 #include <asm/nospec-branch.h>
+#include <linux/linkage.h>
 #include <asm/frame.h>
 
 
 #define HSL_SIZE            0x90  //MUST BE 16 BYTE ALIGNED
 
-#define HSL_GVMCB_PA  0x00
-#define HSL_HVMCB_PA  0x08
-#define HSL_SELF      0x10
-#define HSL_SHAREDATA 0x18
-#define HSL_PADDING   0x20
-#define HSL_RESERVED  0x28
-#define HSL_HRSP      0x30
-#define HSL_PAD       0x38
-#define HSL_GXCR0     0x40
-#define HSL_HXCR0     0x48
-#define HSL_GXSS      0x50
-#define HSL_HXSS      0x58
-#define HSL_GPKRU     0x60
-#define HSL_HPKRU     0x68
-#define HSL_FFLGS     0x70
-#define HSL_PAD2      0x78
-#define EXTRA1        0x80
-#define EXTRA2        0x88
+#define HSL_GVMCB_PA        0x00
+#define HSL_HVMCB_PA        0x08
+#define HSL_SELF            0x10
+#define HSL_SHAREDATA       0x18
+#define HSL_PADDING         0x20
+#define HSL_RESERVED        0x28
+#define HSL_HRSP            0x30
+#define HSL_PAD             0x38
+#define HSL_GXCR0           0x40
+#define HSL_HXCR0           0x48
+#define HSL_GXSS            0x50
+#define HSL_HXSS            0x58
+#define HSL_GPKRU           0x60
+#define HSL_HPKRU           0x68
+#define HSL_FFLGS           0x70
+#define HSL_PAD2            0x78
+#define EXTRA1              0x80
+#define EXTRA2              0x88
 
 
 #define HSL_FEAT_XSAVE      0x1
 #define HSL_FEAT_XSAVES     0x2
 #define HSL_FEAT_PKU        0x4
+#define MSR_IA32_XSS        0x00000da0
 
 #define GUEST_REGS_SIZE     0x80 //sizeof(struct guest_regs)
 
-#define XMM_AREA_SIZE       0x80 // 0x20 alignment pad + 6 × 16 bytes = 0x80 
+#define XMM_AREA_SIZE       0x80 // 0x20 alignment pad + 6 × 16 = 0x80 
 
 #define SNAP_HOST_VMCB_VA 0x18
 #define SNAP_HOST_VMCB      0x20
@@ -65,7 +65,7 @@
 .endm
 
 
-.macro POPALL
+.macro POPALL 
     pop     %r15
     pop     %r14
     pop     %r13
@@ -99,13 +99,13 @@ virt:
 
 .Lrun:
 
-    //handles pkru and xsave 
+    // handles pkru and xsave 
 
     mov     %rcx, HSL_PADDING(%rsp)  //this and the next one is just u64 padding so i'm using that rather than adding more shit and fucking up the offsets
     mov     %rdx, HSL_RESERVED(%rsp)
 
     testq   $HSL_FEAT_XSAVE, HSL_FFLGS(%rsp)
-    jz      78f
+    jz      2f
 
     xor     %ecx, %ecx
     xgetbv
@@ -114,20 +114,22 @@ virt:
     mov     %rax, HSL_HXCR0(%rsp)
 
     testq   $HSL_FEAT_XSAVES, HSL_FFLGS(%rsp)
-    jz      77f
+    jz      1f
     mov     $MSR_IA32_XSS, %ecx
     rdmsr
     shl     $32, %rdx
     or      %rdx, %rax
     mov     %rax, HSL_HXSS(%rsp)
+1:
     testq   $HSL_FEAT_PKU, HSL_FFLGS(%rsp)
-    jz      78f
+    jz      2f
     xor     %ecx, %ecx
     .byte   0x0f, 0x01, 0xee
     mov     %eax, HSL_HPKRU(%rsp)
+2:
 
     testq   $HSL_FEAT_XSAVE, HSL_FFLGS(%rsp)
-    jz      80f
+    jz      4f
 
     mov     HSL_GXCR0(%rsp), %rax
     mov     %rax, %rdx
@@ -136,18 +138,20 @@ virt:
     xsetbv
 
     testq   $HSL_FEAT_XSAVES, HSL_FFLGS(%rsp)
-    jz      79f
+    jz      3f
     mov     HSL_GXSS(%rsp), %rax
     mov     %rax, %rdx
     shr     $32, %rdx
     mov     $MSR_IA32_XSS, %ecx
     wrmsr
+3:
     testq   $HSL_FEAT_PKU, HSL_FFLGS(%rsp)
-    jz      80f
+    jz      4f
     mov     HSL_GPKRU(%rsp), %eax
     xor     %ecx, %ecx
     xor     %edx, %edx
     .byte   0x0f, 0x01, 0xef
+4:
     mov     HSL_RESERVED(%rsp), %rdx
     mov     HSL_PADDING(%rsp), %rcx
 
@@ -166,6 +170,7 @@ virt:
     vmrun   %rax
 
 .Prun:
+5:
     mov     HSL_GVMCB_PA(%rsp), %rax
     vmsave  %rax
 
@@ -191,7 +196,7 @@ virt:
 
     lea     XMM_AREA_SIZE + GUEST_REGS_SIZE(%rsp), %r11
     testq   $HSL_FEAT_XSAVE, HSL_FFLGS(%r11)
-    jz      90f
+    jz      9f
 
     push    %rax
     push    %rcx
@@ -210,7 +215,7 @@ virt:
     xsetbv
 
     testq   $HSL_FEAT_XSAVES, HSL_FFLGS(%r11)
-    jz      89f
+    jz      6f
     mov     $MSR_IA32_XSS, %ecx
     rdmsr
     shl     $32, %rdx
@@ -222,8 +227,9 @@ virt:
     shr     $32, %rdx
     mov     $MSR_IA32_XSS, %ecx
     wrmsr
+6:
     testq   $HSL_FEAT_PKU, HSL_FFLGS(%r11)
-    jz      88f
+    jz      7f
     xor     %ecx, %ecx
     .byte   0x0f, 0x01, 0xee
     mov     %eax, HSL_GPKRU(%r11)
@@ -232,10 +238,11 @@ virt:
     xor     %ecx, %ecx
     xor     %edx, %edx
     .byte   0x0f, 0x01, 0xef
-
+7:
     pop     %rdx
     pop     %rcx
     pop     %rax
+8:
 
     lea     XMM_AREA_SIZE(%rsp), %rdi   //rdi = guest_regs * 
     mov     XMM_AREA_SIZE + GUEST_REGS_SIZE + HSL_SELF(%rsp), %rsi     //rsi = snap/self * 
@@ -243,7 +250,7 @@ virt:
 
     lea     XMM_AREA_SIZE + GUEST_REGS_SIZE(%rsp), %r11
     testq   $HSL_FEAT_XSAVE, HSL_FFLGS(%r11)
-    jz      100f
+    jz      11f
 
     push    %rax
     push    %rcx
@@ -256,23 +263,24 @@ virt:
     xsetbv
 
     testq   $HSL_FEAT_XSAVES, HSL_FFLGS(%r11)
-    jz      99f
+    jz      9f
     mov     HSL_GXSS(%r11), %rax
     mov     %rax, %rdx
     shr     $32, %rdx
     mov     $MSR_IA32_XSS, %ecx
     wrmsr
-
+9:
     testq   $HSL_FEAT_PKU, HSL_FFLGS(%r11)
-    jz      98f
+    jz      10f
     mov     HSL_GPKRU(%r11), %eax
     xor     %ecx, %ecx
     xor     %edx, %edx
     .byte   0x0f, 0x01, 0xef
-
+10:
     pop     %rdx
     pop     %rcx
     pop     %rax
+11:
 
     //as mentioned gotta restore them prior to the next entry 
     movaps  0x70(%rsp), %xmm5
